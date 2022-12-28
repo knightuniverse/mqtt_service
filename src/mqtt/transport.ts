@@ -1,9 +1,4 @@
-/*
- * @Author: Milo
- * @Date: 2022-12-26 13:44:18
- * Copyright © Leedarson. All rights reserved.
- */
-import { each, isArray, isNil, isString } from 'lodash';
+import { each, isArray, isNil, isString } from "lodash";
 import type {
   ClientSubscribeCallback,
   CloseCallback,
@@ -14,10 +9,10 @@ import type {
   IDisconnectPacket,
   MqttClient,
   PacketCallback,
-} from 'mqtt';
-import mqtt from 'mqtt';
+} from "mqtt";
+import mqtt from "mqtt";
 
-import type { Callable } from './constants';
+import type { Callable } from "./constants";
 import {
   GUEST_CLIENT_ID,
   MqttEvent,
@@ -25,7 +20,7 @@ import {
   TOPIC,
   TOPIC_HEADER,
   TOPIC_VERSION,
-} from './constants';
+} from "./constants";
 
 type ClientOptions = IClientOptions & {
   clientId: string;
@@ -43,7 +38,8 @@ type ClientOptions = IClientOptions & {
 class Transport {
   private __mqttTopics = new Set<string>();
   private __connection: { brokerUrl: string; opts: ClientOptions };
-  private __listeners: Map</** Event */ string, /** Listener */ Set<Callable>> = new Map();
+  private __listeners: Map</** Event */ string, /** Listener */ Set<Callable>> =
+    new Map();
   private __mqttClient: MqttClient | null = null;
 
   static create(connection: { brokerUrl: string; opts: ClientOptions }) {
@@ -102,33 +98,33 @@ class Transport {
     const { brokerUrl, opts } = this.__connection;
     const client = mqtt.connect(brokerUrl, opts);
     client.on(MqttEvent.Connect, (connack: IConnackPacket) => {
-      console.info('Transport connect');
+      console.info("Transport connect");
       this.dispatchEvent(MqttEvent.Connect, [connack]);
     });
     client.on(MqttEvent.Reconnect, () => {
-      console.info('Transport reconnect');
+      console.info("Transport reconnect");
       this.dispatchEvent(MqttEvent.Reconnect, []);
     });
     client.on(MqttEvent.Close, () => {
-      console.info('Transport close');
+      console.info("Transport close");
       this.dispatchEvent(MqttEvent.Close, []);
     });
     client.on(MqttEvent.Disconnect, (packet: IDisconnectPacket) => {
-      console.warn('Transport disconnect');
+      console.warn("Transport disconnect");
       this.dispatchEvent(MqttEvent.Disconnect, [packet]);
     });
     client.on(MqttEvent.Offline, () => {
-      console.warn('Transport offline');
+      console.warn("Transport offline");
       this.dispatchEvent(MqttEvent.Offline, []);
     });
     client.on(MqttEvent.Error, (error: Error) => {
-      console.error('Transport error');
+      console.error("Transport error");
       this.dispatchEvent(MqttEvent.Connect, [error]);
       this.end();
       this.dispose();
     });
     client.on(MqttEvent.End, () => {
-      console.info('Transport end');
+      console.info("Transport end");
       this.dispatchEvent(MqttEvent.End, []);
     });
     client.on(MqttEvent.Message, (topic, message, packet) => {
@@ -143,7 +139,7 @@ class Transport {
 
   dispatchEvent(event: MqttEvent, args: any[]) {
     const handlers = this.__listeners.get(event) || new Set();
-    handlers.forEach(callable => {
+    handlers.forEach((callable) => {
       callable.func.apply(callable.thisArg, args);
     });
   }
@@ -175,9 +171,11 @@ class Transport {
     /**
      * Mqtt topic，e.g iot/v1/c/923aed8850694291b7cd4f76f47571bc/layout_device/status
      */
-    mqttTopic: string,
+    mqttTopic: string
   ): string | null {
-    const reg = new RegExp(`${TOPIC_HEADER}\\/${TOPIC_VERSION}\\/c\\/${this.clientId}\\/(\\S+)`);
+    const reg = new RegExp(
+      `${TOPIC_HEADER}\\/${TOPIC_VERSION}\\/c\\/${this.clientId}\\/(\\S+)`
+    );
     const match = reg.exec(mqttTopic);
     return isNil(match) ? null : match[1];
   }
@@ -186,7 +184,7 @@ class Transport {
     /**
      * 业务主题，e.g layout_device/status
      */
-    subject: string,
+    subject: string
   ) {
     return `${TOPIC.CLIENT}/${this.clientId}/${subject}`;
   }
@@ -199,7 +197,7 @@ class Transport {
       qos: MqttQoS.AtLeastOnce,
       retain: false,
     },
-    callback?: PacketCallback,
+    callback?: PacketCallback
   ) {
     if (isNil(this.__mqttClient)) {
       return;
@@ -239,7 +237,10 @@ class Transport {
    * @param options MQTT配置
    * @returns
    */
-  subscribe(topic: string | string[], options: IClientSubscribeOptions = { qos: 1 }) {
+  subscribe(
+    topic: string | string[],
+    options: IClientSubscribeOptions = { qos: 1 }
+  ) {
     return new Promise((resolve, reject) => {
       if (isNil(this.__mqttClient)) {
         return resolve([]);
@@ -250,7 +251,7 @@ class Transport {
       }
 
       if (isArray(topic)) {
-        each(topic, t => {
+        each(topic, (t) => {
           this.__mqttTopics.add(t);
         });
       }
@@ -267,7 +268,11 @@ class Transport {
     });
   }
 
-  unsubscribe(topic: string | string[], opts?: Object, callback?: PacketCallback) {
+  unsubscribe(
+    topic: string | string[],
+    opts?: Object,
+    callback?: PacketCallback
+  ) {
     if (isNil(this.__mqttClient)) {
       return;
     }
@@ -277,7 +282,7 @@ class Transport {
     }
 
     if (isArray(topic)) {
-      each(topic, t => {
+      each(topic, (t) => {
         this.__mqttTopics.delete(t);
       });
     }

@@ -1,10 +1,4 @@
-/*
- * @Author: Milo
- * @Date: 2022-12-26 14:02:20
- * Copyright © Leedarson. All rights reserved.
- */
-
-import { isNil, isString } from 'lodash';
+import { isNil, isString } from "lodash";
 
 /**
  * IMP-Web业务
@@ -15,15 +9,18 @@ import { isNil, isString } from 'lodash';
  */
 class Business {
   private __bid: number | string | null = null;
-  private __subject: string = '';
-  public static create(args: { subject: string; bid?: number | string }): Business {
+  private __subject: string = "";
+  public static create(args: {
+    subject: string;
+    bid?: number | string;
+  }): Business {
     return new Business(args.subject, { bid: args.bid });
   }
   constructor(
     subject: string,
     extra: {
       bid?: number | string;
-    } = {},
+    } = {}
   ) {
     const { bid } = extra;
 
@@ -36,7 +33,7 @@ class Business {
   }
 
   public get id() {
-    return `${this.__subject}|${isNil(this.__bid) ? '' : this.__bid}`;
+    return `${this.__subject}|${isNil(this.__bid) ? "" : this.__bid}`;
   }
 
   public get subject() {

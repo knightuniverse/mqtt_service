@@ -1,12 +1,6 @@
-/*
- * @Author: Milo
- * @Date: 2022-12-27 14:47:23
- * Copyright © Leedarson. All rights reserved.
- */
-
 // 兼容层，主要的目标是实现上一代Mqtt组件在系统中大范围使用的函数、变量的兼容
 
-import { IMP_WEB_SUBJECT } from './constants';
+import { IMP_WEB_SUBJECT } from "./constants";
 
 /**
  * @remarks
@@ -28,7 +22,7 @@ const MQTT_TOPICS = IMP_WEB_SUBJECT;
  * const name = subject2ReduxStateName(IMP_WEB_SUBJECT.LOG_DETAIL); // LOG_DETAIL
  */
 function subject2ReduxStateName(subject: string) {
-  const stateName = subject.split('/').join('_');
+  const stateName = subject.split("/").join("_");
   const upperCaseStateName = stateName.toUpperCase();
   return upperCaseStateName;
 }
@@ -55,4 +49,9 @@ function transformTopic(subject: string) {
   return subject2ReduxStateName(subject);
 }
 
-export { MQTT_TOPICS, combineStateName, subject2ReduxStateName, transformTopic };
+export {
+  MQTT_TOPICS,
+  combineStateName,
+  subject2ReduxStateName,
+  transformTopic,
+};

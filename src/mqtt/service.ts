@@ -1,26 +1,31 @@
-/*
- * @Author: Milo
- * @Date: 2022-12-26 14:42:20
- * Copyright © Leedarson. All rights reserved.
- */
+import { each, isNil } from "lodash";
 
-import { each, isNil } from 'lodash';
+import { DRAFT_ID } from "../constants";
+import { PREFIX_HASH } from "../http";
+import type { IMSTDependence } from "../types";
 
-import type { IMSTDependence } from '@platform/core/infra';
-import { DRAFT_ID, PREFIX_HASH } from '@platform/core/infra';
-
-import type { Callable } from './constants';
-import { GUEST_CLIENT_ID, KnownMqttEvents, MqttEvent, MqttQoS, TOPIC } from './constants';
-import type { ClientOptions } from './transport';
-import { Transport } from './transport';
-import { formatDate, getSeq } from './utils';
-import { DRAFT_MQTT_SERVICE_WORKER_ID, MqttServiceWorker, uniqueWorkerId } from './worker';
+import type { Callable } from "./constants";
+import {
+  GUEST_CLIENT_ID,
+  KnownMqttEvents,
+  MqttEvent,
+  MqttQoS,
+  TOPIC,
+} from "./constants";
+import type { ClientOptions } from "./transport";
+import { Transport } from "./transport";
+import { formatDate, getSeq } from "./utils";
+import {
+  DRAFT_MQTT_SERVICE_WORKER_ID,
+  MqttServiceWorker,
+  uniqueWorkerId,
+} from "./worker";
 
 const dummyTransport = Transport.create({
-  brokerUrl: '',
+  brokerUrl: "",
   opts: {
     clientId: GUEST_CLIENT_ID,
-    password: '',
+    password: "",
   },
 });
 
@@ -31,7 +36,7 @@ const dummyWorker = {
 
 function getWindowPathPrefix(isTrimLine = false) {
   // platform 平台基座应用，不加前缀
-  const prefix = window.PATH_PREFIX === 'platform' ? '' : window.PATH_PREFIX;
+  const prefix = window.PATH_PREFIX === "platform" ? "" : window.PATH_PREFIX;
   const pathPrefix = prefix && `/${prefix}`;
   return isTrimLine ? prefix : pathPrefix;
 }
@@ -229,9 +234,18 @@ enum MqttServiceState {
  *   - projects\platform\src\t800.tsx#code === 600057， 用户token过期
  */
 class MqttService {
-  private __builtInListeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
-  private __extraListeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
-  private __listeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
+  private __builtInListeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
+  private __extraListeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
+  private __listeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
   private __sharedTransport = dummyTransport;
   private __env: IMSTDependence;
   private __workers = new Set<MqttServiceWorker>();
@@ -243,7 +257,7 @@ class MqttService {
     sn: {
       id?: string;
     },
-    env: IMSTDependence,
+    env: IMSTDependence
   ) {
     return new MqttService(sn, env);
   }
@@ -252,7 +266,7 @@ class MqttService {
     sn: {
       id?: string;
     },
-    env: IMSTDependence,
+    env: IMSTDependence
   ) {
     const id = sn.id || DRAFT_ID;
 
@@ -296,9 +310,9 @@ class MqttService {
                  *   so it publishes to only one topic device-id/stream1,
                  *   and the subscriber just subscribes to this one topic.
                  */
-                await transport.subscribe(transport.getTopic('#'));
+                await transport.subscribe(transport.getTopic("#"));
               } catch (error) {
-                console.error('MqttService boot error', error);
+                console.error("MqttService boot error", error);
               } finally {
                 this.__state = MqttServiceState.Running;
               }
@@ -307,7 +321,7 @@ class MqttService {
             subscribeAllMqttTopics4ThisClientId();
           },
         },
-      ]),
+      ])
     );
 
     // TODO 接下来我们需要做的是，处理各种情况下的error，保持mqtt连接能正常工作
@@ -354,15 +368,15 @@ class MqttService {
       const { cache } = this.__env;
 
       const clientId = await this.fetClientId();
-      const mqttPassword = await cache.getItem<string>('mqttPassword');
-      const token = await cache.getItem<string>('token');
+      const mqttPassword = await cache.getItem<string>("mqttPassword");
+      const token = await cache.getItem<string>("token");
 
       if (isNil(token)) {
-        return reject(new Error('Guest is forbidden'));
+        return reject(new Error("Guest is forbidden"));
       }
 
       if (isNil(mqttPassword)) {
-        return reject(new Error('Mqtt password is required'));
+        return reject(new Error("Mqtt password is required"));
       }
 
       const brokerUrl = await this.getBrokerUrl();
@@ -376,7 +390,7 @@ class MqttService {
         Transport.create({
           brokerUrl,
           opts,
-        }),
+        })
       );
     });
   }
@@ -392,14 +406,14 @@ class MqttService {
             id: uniqueWorkerId(),
             transport: transport,
           },
-          this.__env,
+          this.__env
         )
       : MqttServiceWorker.create(
           {
             id: uniqueWorkerId(),
             transport: this.__sharedTransport,
           },
-          this.__env,
+          this.__env
         );
 
     this.__workers.add(worker);
@@ -422,16 +436,18 @@ class MqttService {
     this.__state = MqttServiceState.Stopping;
 
     // dispose all workers
-    await Promise.all(Array.from(this.__workers.values()).map(worker => worker.exit()));
+    await Promise.all(
+      Array.from(this.__workers.values()).map((worker) => worker.exit())
+    );
 
-    this.__workers.forEach(w => {
+    this.__workers.forEach((w) => {
       if (w.transport !== this.__sharedTransport) {
         w.transport.end(true);
       }
     });
     this.__workers.clear();
     this.__listeners.forEach((cs, e) => {
-      cs.forEach(c => {
+      cs.forEach((c) => {
         this.__sharedTransport.removeEventListener(e, c);
       });
     });
@@ -452,11 +468,11 @@ class MqttService {
   async fetClientId() {
     const { api, cache } = this.__env;
 
-    const uuid = await cache.getItem<string>('mqttUuid');
-    const mqttPwd = await cache.getItem<string>('mqttPassword');
-    const type = !getWindowPathPrefix() ? 'base-page' : 'sub-page';
+    const uuid = await cache.getItem<string>("mqttUuid");
+    const mqttPwd = await cache.getItem<string>("mqttPassword");
+    const type = !getWindowPathPrefix() ? "base-page" : "sub-page";
     const { data } = await api.get<string>(
-      '/v2/client/getClientId',
+      "/v2/client/getClientId",
       {
         uuid,
         mqttPwd,
@@ -465,7 +481,7 @@ class MqttService {
       {
         apiChange: PREFIX_HASH.building,
         isCatch: false,
-      },
+      }
     );
 
     return data;
@@ -478,8 +494,8 @@ class MqttService {
    */
   async getBrokerUrl() {
     const { cache } = this.__env;
-    const host = await cache.getItem<string>('mqttHost');
-    const protocol = await cache.getItem<string>('mqttHostProtocol');
+    const host = await cache.getItem<string>("mqttHost");
+    const protocol = await cache.getItem<string>("mqttHostProtocol");
     return `${protocol}://${host}/mqtt`;
   }
 
@@ -503,7 +519,7 @@ class MqttService {
       keepalive: 60, // 心跳间隔，秒
       reschedulePings: true, // 发送包后重新安排ping消息
       clientId,
-      protocolId: 'MQTT',
+      protocolId: "MQTT",
       protocolVersion: 4, // MQTT 3.1.1 版本
       clean: true, // 注意：只能是true，设置为false，以便在脱机时接收QoS 1和2消息，Broker服务器不支持false，否则提示错误 Error: Connection refused: Server unavailable
       reconnectPeriod: 5000, // 重连间隔, 毫秒
@@ -528,15 +544,15 @@ class MqttService {
         // properties MQTT 5.0
         // 注意：只能传string
         payload: JSON.stringify({
-          service: 'user',
-          method: 'disconnect',
+          service: "user",
+          method: "disconnect",
           seq: getSeq(),
           srcAddr: `0.${clientId}`,
           clientId,
           payload: {
             timestamp: formatDate(new Date()),
             uniqueMsgId: 0,
-            token: token.split('.')[2], // 遗言给api用
+            token: token.split(".")[2], // 遗言给api用
           },
         }),
       },
@@ -556,22 +572,22 @@ class MqttService {
     if (this.__state !== MqttServiceState.Created) {
       return;
     }
-    console.log('MqttService init');
+    console.log("MqttService init");
 
     this.__state = MqttServiceState.Initializing;
 
     const sharedTransport = await this.createTransport();
     this.__sharedTransport = sharedTransport;
 
-    each(KnownMqttEvents, evt => {
+    each(KnownMqttEvents, (evt) => {
       const callable: Callable = {
         thisArg: this,
         func: (...args) => {
-          (this.__builtInListeners.get(evt) || new Set()).forEach(c => {
+          (this.__builtInListeners.get(evt) || new Set()).forEach((c) => {
             c.func.apply(c.thisArg, args);
           });
 
-          (this.__extraListeners.get(evt) || new Set()).forEach(c => {
+          (this.__extraListeners.get(evt) || new Set()).forEach((c) => {
             c.func.apply(c.thisArg, args);
           });
         },
@@ -594,21 +610,21 @@ class MqttService {
     if (this.__state < MqttServiceState.Running) {
       return;
     }
-    console.log('MqttService kill');
+    console.log("MqttService kill");
 
     this.__state = MqttServiceState.Stopping;
-    this.__workers.forEach(w => {
+    this.__workers.forEach((w) => {
       if (w.transport === this.__sharedTransport) {
-        return each(KnownMqttEvents, evt => w.removeEventListener(evt));
+        return each(KnownMqttEvents, (evt) => w.removeEventListener(evt));
       }
 
       w.transport.end(false, {}, () => {
-        each(KnownMqttEvents, evt => w.removeEventListener(evt));
+        each(KnownMqttEvents, (evt) => w.removeEventListener(evt));
       });
     });
     this.__workers.clear();
     this.__sharedTransport.end(false, {}, () => {
-      each(KnownMqttEvents, evt => this.removeEventListener(evt));
+      each(KnownMqttEvents, (evt) => this.removeEventListener(evt));
 
       this.__state = MqttServiceState.Created;
     });
@@ -624,10 +640,10 @@ class MqttService {
     if (this.__state === MqttServiceState.Running) {
       return;
     }
-    console.log('MqttService resume');
+    console.log("MqttService resume");
 
     this.__state = MqttServiceState.Resuming;
-    this.__workers.forEach(w => {
+    this.__workers.forEach((w) => {
       if (w.transport === this.__sharedTransport) {
         return;
       }
@@ -662,10 +678,10 @@ class MqttService {
     if (this.__state <= MqttServiceState.Suspended) {
       return;
     }
-    console.log('MqttService suspend');
+    console.log("MqttService suspend");
 
     this.__state = MqttServiceState.Suspending;
-    this.__workers.forEach(w => {
+    this.__workers.forEach((w) => {
       if (w.transport === this.__sharedTransport) {
         return;
       }

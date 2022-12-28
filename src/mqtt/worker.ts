@@ -1,20 +1,13 @@
-/*
- * @Author: Milo
- * @Date: 2022-12-26 14:00:33
- * Copyright © Leedarson. All rights reserved.
- */
+import { each, isNil, uniqueId } from "lodash";
+import type { Packet } from "mqtt";
 
-import { each, isNil, uniqueId } from 'lodash';
-import type { Packet } from 'mqtt';
+import { PREFIX_HASH } from "../http";
+import type { IMSTDependence } from "../types";
 
-import { PREFIX_HASH } from '@platform/core/infra';
-
-import type { IMSTDependence } from '@platform/core/infra';
-
-import type { Business } from './business';
-import type { Callable, MqttPayload } from './constants';
-import { KnownMqttEvents, MqttEvent, TOPIC } from './constants';
-import type { Transport } from './transport';
+import type { Business } from "./business";
+import type { Callable, MqttPayload } from "./constants";
+import { KnownMqttEvents, MqttEvent, TOPIC } from "./constants";
+import type { Transport } from "./transport";
 
 type PBusiness = {
   /**
@@ -31,7 +24,7 @@ type PBusiness = {
  * @param prefix ID前缀，默认值：MqttServiceWorker_
  * @returns
  */
-function uniqueWorkerId(prefix = 'MqttServiceWorker_') {
+function uniqueWorkerId(prefix = "MqttServiceWorker_") {
   return uniqueId(prefix);
 }
 
@@ -39,7 +32,7 @@ function uniqueWorkerId(prefix = 'MqttServiceWorker_') {
  * MqttServiceWorker默认ID
  * @private
  */
-const DRAFT_MQTT_SERVICE_WORKER_ID = '69b153e9-241d-4467-bb20-f048f29843db';
+const DRAFT_MQTT_SERVICE_WORKER_ID = "69b153e9-241d-4467-bb20-f048f29843db";
 
 /**
  * MqttServiceWorker，负责Mqtt消息的发送，以及在接收到Mqtt消息后，消息的处理
@@ -58,12 +51,28 @@ class MqttServiceWorker {
 
   private __followMessageDigest = new Map<
     /* Follow ID */ string,
-    /* Follow Message Digest */ (topic: string, payload: Buffer, packet: Packet) => void
+    /* Follow Message Digest */ (
+      topic: string,
+      payload: Buffer,
+      packet: Packet
+    ) => void
   >();
-  private __followMessages = new Map</* Follow ID */ string, /* Follow Message */ MqttPayload>();
-  private __builtInListeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
-  private __extraListeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
-  private __listeners = new Map</** Event */ MqttEvent, /** Listener */ Set<Callable>>();
+  private __followMessages = new Map<
+    /* Follow ID */ string,
+    /* Follow Message */ MqttPayload
+  >();
+  private __builtInListeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
+  private __extraListeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
+  private __listeners = new Map<
+    /** Event */ MqttEvent,
+    /** Listener */ Set<Callable>
+  >();
   private __transport: Transport;
 
   static create(
@@ -71,7 +80,7 @@ class MqttServiceWorker {
       id: string;
       transport: Transport;
     },
-    env: IMSTDependence,
+    env: IMSTDependence
   ) {
     return new MqttServiceWorker(sn, env);
   }
@@ -80,7 +89,7 @@ class MqttServiceWorker {
       id: string;
       transport: Transport;
     },
-    env: IMSTDependence,
+    env: IMSTDependence
   ) {
     const { id, transport } = sn;
 
@@ -120,7 +129,8 @@ class MqttServiceWorker {
                * 这个时候Broker推送的消息，AA和BB都会接收到，因为无法根据bid进行区分是不是属于自己的消息。
                *
                */
-              const isMyMessage = !isNil(f) && this.__transport.getTopic(f.subject) === topic;
+              const isMyMessage =
+                !isNil(f) && this.__transport.getTopic(f.subject) === topic;
               if (!isMyMessage) {
                 return;
               }
@@ -129,18 +139,18 @@ class MqttServiceWorker {
             });
           },
         },
-      ]),
+      ])
     );
 
-    each(KnownMqttEvents, evt => {
+    each(KnownMqttEvents, (evt) => {
       const callable: Callable = {
         thisArg: this,
         func: (...args) => {
-          (this.__builtInListeners.get(evt) || new Set()).forEach(c => {
+          (this.__builtInListeners.get(evt) || new Set()).forEach((c) => {
             c.func.apply(c.thisArg, args);
           });
 
-          (this.__extraListeners.get(evt) || new Set()).forEach(c => {
+          (this.__extraListeners.get(evt) || new Set()).forEach((c) => {
             c.func.apply(c.thisArg, args);
           });
         },
@@ -189,7 +199,7 @@ class MqttServiceWorker {
    */
   private async __letApiKnowIAmInterested(data: PBusiness) {
     const { api } = this.__env;
-    await api.post<boolean>('/v2/client/notify/sub', data, {
+    await api.post<boolean>("/v2/client/notify/sub", data, {
       apiChange: PREFIX_HASH.building,
       isCatch: false,
     });
@@ -200,7 +210,7 @@ class MqttServiceWorker {
    */
   private async __letApiKnowIAmNotInterested(data: PBusiness) {
     const { api } = this.__env;
-    await api.post<boolean>('/v2/client/notify/unsub', data, {
+    await api.post<boolean>("/v2/client/notify/unsub", data, {
       apiChange: PREFIX_HASH.building,
       isCatch: false,
     });
@@ -221,12 +231,14 @@ class MqttServiceWorker {
    */
   async exit() {
     // unwatch all
-    await Promise.all(Array.from(this.__follows.values()).map(f => this.unwatch(f)));
+    await Promise.all(
+      Array.from(this.__follows.values()).map((f) => this.unwatch(f))
+    );
 
     this.__follows.clear();
     this.__followMessageDigest.clear();
     this.__listeners.forEach((cs, e) => {
-      cs.forEach(c => {
+      cs.forEach((c) => {
         this.__transport.removeEventListener(e, c);
       });
     });
@@ -256,7 +268,7 @@ class MqttServiceWorker {
     }
     await this.__letApiKnowIAmInterested({
       bid: bid,
-      topic: [TOPIC.CLIENT, 'uuid', subject].join('/'),
+      topic: [TOPIC.CLIENT, "uuid", subject].join("/"),
       clientId: this.__transport.clientId,
     });
   }
@@ -275,7 +287,7 @@ class MqttServiceWorker {
     }
     await this.__letApiKnowIAmNotInterested({
       bid: bid,
-      topic: [TOPIC.CLIENT, 'uuid', subject].join('/'),
+      topic: [TOPIC.CLIENT, "uuid", subject].join("/"),
       clientId: this.__transport.clientId,
     });
   }
@@ -316,7 +328,7 @@ class MqttServiceWorker {
 
     if (needsToLetApiKnowIAMNotInterested) {
       await this.__letApiKnowIAmNotInterested({
-        topic: [TOPIC.CLIENT, 'uuid', subject].join('/'),
+        topic: [TOPIC.CLIENT, "uuid", subject].join("/"),
         clientId: this.__transport.clientId,
         bid,
       });
@@ -355,16 +367,19 @@ class MqttServiceWorker {
     if (needsToLetApiKnowIAMInterested && !isApiAware) {
       await this.__letApiKnowIAmInterested({
         bid: bid,
-        topic: [TOPIC.CLIENT, 'uuid', subject].join('/'),
+        topic: [TOPIC.CLIENT, "uuid", subject].join("/"),
         clientId: this.__transport.clientId,
       });
     }
 
     this.__follows.set(f.id, f);
-    this.__followMessageDigest.set(f.id, (topic: string, payload: Buffer, packet: Packet) => {
-      const message = JSON.parse(String(payload)) as MqttPayload;
-      this.__followMessages.set(f.id, message);
-    });
+    this.__followMessageDigest.set(
+      f.id,
+      (topic: string, payload: Buffer, packet: Packet) => {
+        const message = JSON.parse(String(payload)) as MqttPayload;
+        this.__followMessages.set(f.id, message);
+      }
+    );
   }
 }
 

@@ -1,20 +1,20 @@
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
-import type { ISubject } from '../service/anon';
-import type { ICache } from './cache';
-import type { ExtraConfig, IHttp } from './http';
-import { IocInstanceType } from './ioc';
-import type { MqttService } from './mqtt';
-import type { IMSTDependence } from './types';
+import type { ISubject } from "../service/anon";
+import type { ICache } from "./cache";
+import type { ExtraConfig, IHttp } from "./http";
+import { IocInstanceType } from "./ioc";
+import type { MqttService } from "./mqtt";
+import type { IMSTDependence } from "./types";
 
 function api(
   config: {
     params: Record<string, unknown>;
-    method: 'get' | 'delete' | 'patch' | 'post' | 'put';
+    method: "get" | "delete" | "patch" | "post" | "put";
     url: string;
-  } & ExtraConfig,
+  } & ExtraConfig
 ) {
-  const I = window.lds.I;
+  const I = window.I;
   const http = I.get<IHttp>(IocInstanceType.API);
   const { params, method, url, ...extraConfig } = config;
   return http[method](url, params, extraConfig);
@@ -23,39 +23,39 @@ function api(
 function api2(
   config: {
     params: Record<string, unknown>;
-    method: 'get' | 'delete' | 'patch' | 'post' | 'put';
+    method: "get" | "delete" | "patch" | "post" | "put";
     url: string;
-  } & ExtraConfig,
+  } & ExtraConfig
 ) {
-  const I = window.lds.I;
+  const I = window.I;
   const http = I.get<IHttp>(IocInstanceType.API2);
   const { params, method, url, ...extraConfig } = config;
   return http[method](url, params, extraConfig);
 }
 
 function useCache(): ICache {
-  const I = window.lds.I;
+  const I = window.I;
   return I.get<ICatch>(IocInstanceType.WebStorageCache);
 }
 
 function useCurrentUser() {
-  const I = window.lds.I;
+  const I = window.I;
   const user: ISubject = I.get<ISubject>(IocInstanceType.Subject);
   return user;
 }
 
 function useApi(): IHttp {
-  const I = window.lds.I;
+  const I = window.I;
   return I.get<IHttp>(IocInstanceType.API);
 }
 
 function useApi2(): IHttp {
-  const I = window.lds.I;
+  const I = window.I;
   return I.get<IHttp>(IocInstanceType.API2);
 }
 
 function useMqttService() {
-  const I = window.lds.I;
+  const I = window.I;
   return I.get<MqttService>(IocInstanceType.MqttService);
 }
 
@@ -69,7 +69,7 @@ function useMSTDependence(): IMSTDependence {
       api2: httpUsingApi2,
       cache,
     }),
-    [cache, httpUsingApi, httpUsingApi2],
+    [cache, httpUsingApi, httpUsingApi2]
   );
 
   return dependence;
@@ -81,7 +81,7 @@ function useMSTDependence(): IMSTDependence {
  * @returns
  */
 function killMqttService() {
-  const I = window.lds.I;
+  const I = window.I;
   const service = I.get<MqttService>(IocInstanceType.MqttService);
   if (service.isGuest) {
     return;
