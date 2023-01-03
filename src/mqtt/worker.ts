@@ -1,8 +1,9 @@
 import { each, isNil, uniqueId } from "lodash";
 import type { Packet } from "mqtt";
 
-import { PREFIX_HASH } from "../http";
-import type { IMSTDependence } from "../types";
+import { PREFIX_HASH } from "@platform/core/infra";
+
+import type { IMSTDependence } from "@platform/core/infra";
 
 import type { Business } from "./business";
 import type { Callable, MqttPayload } from "./constants";

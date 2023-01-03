@@ -28,22 +28,68 @@ type ClientOptions = IClientOptions & {
 };
 
 /**
+ * Transport接口，规定了Transport要实现的属性和方法
+ *
+ * @remarks
+ *
+ * 这样做的好处是，我们的service以及worker依赖的是抽象的接口，目前的实现是MqttTransport，后面我们完善可以使用SharedWorker实现另一套Transport
+ *
+ * @see [Run websocket in web worker or service worker - javascript](https://stackoverflow.com/questions/61865890/run-websocket-in-web-worker-or-service-worker-javascript)
+ */
+interface Transport {
+  readonly brokerUrl: string;
+  readonly clientId: string;
+  readonly connected: boolean;
+  readonly isGuest: boolean;
+  readonly reconnecting: boolean;
+  readonly topics: string[];
+  addEventListener: (event: MqttEvent, callable: Callable) => void;
+  connect: () => void;
+  dispose: () => void;
+  dispatchEvent: (event: MqttEvent, args: any[]) => void;
+  end: (force?: boolean, opts?: Object, cb?: CloseCallback) => void;
+  getSubject: (mqttTopic: string) => string | null;
+  getTopic: (subject: string) => string;
+  publish: (
+    topic: string,
+    message: string,
+    opts?: IClientPublishOptions,
+    callback?: PacketCallback
+  ) => void;
+  reconnect: () => void;
+  removeEventListener: (event: MqttEvent, callable?: Callable) => void;
+  subscribe: (
+    topic: string | string[],
+    options?: IClientSubscribeOptions
+  ) => Promise<unknown>;
+  unsubscribe: (
+    topic: string | string[],
+    opts?: Object,
+    callback?: PacketCallback
+  ) => void;
+}
+
+/**
  * Transport Based on Mqtt
  * @remarks
  * Transport类的职责是通道，
  *   Transport只会用来收发消息，
  *   消息的准备、处理由上层应用通过事件机制来决定。
  * @see [Understanding MQTT Topics & Wildcards by Case](https://www.emqx.com/en/blog/advanced-features-of-mqtt-topics)
+ * @see [Reason code](https://www.emqx.com/en/blog/mqtt5-new-features-reason-code-and-ack)
  */
-class Transport {
+class MqttTransport implements Transport {
   private __mqttTopics = new Set<string>();
   private __connection: { brokerUrl: string; opts: ClientOptions };
   private __listeners: Map</** Event */ string, /** Listener */ Set<Callable>> =
     new Map();
   private __mqttClient: MqttClient | null = null;
 
-  static create(connection: { brokerUrl: string; opts: ClientOptions }) {
-    return new Transport(connection);
+  static create(connection: {
+    brokerUrl: string;
+    opts: ClientOptions;
+  }): Transport {
+    return new MqttTransport(connection);
   }
 
   constructor(connection: { brokerUrl: string; opts: ClientOptions }) {
@@ -118,7 +164,7 @@ class Transport {
       this.dispatchEvent(MqttEvent.Offline, []);
     });
     client.on(MqttEvent.Error, (error: Error) => {
-      console.error("Transport error");
+      console.error("Transport error", error);
       this.dispatchEvent(MqttEvent.Connect, [error]);
       this.end();
       this.dispose();
@@ -291,5 +337,5 @@ class Transport {
   }
 }
 
-export { Transport };
-export type { ClientOptions };
+export { MqttTransport };
+export type { ClientOptions, Transport };

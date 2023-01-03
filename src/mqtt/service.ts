@@ -1,8 +1,7 @@
 import { each, isNil } from "lodash";
 
-import { DRAFT_ID } from "../constants";
-import { PREFIX_HASH } from "../http";
-import type { IMSTDependence } from "../types";
+import type { IMSTDependence } from "@platform/core/infra";
+import { DRAFT_ID, PREFIX_HASH } from "@platform/core/infra";
 
 import type { Callable } from "./constants";
 import {
@@ -12,8 +11,8 @@ import {
   MqttQoS,
   TOPIC,
 } from "./constants";
-import type { ClientOptions } from "./transport";
-import { Transport } from "./transport";
+import type { ClientOptions, Transport } from "./transport";
+import { MqttTransport } from "./transport";
 import { formatDate, getSeq } from "./utils";
 import {
   DRAFT_MQTT_SERVICE_WORKER_ID,
@@ -21,7 +20,7 @@ import {
   uniqueWorkerId,
 } from "./worker";
 
-const dummyTransport = Transport.create({
+const dummyTransport = MqttTransport.create({
   brokerUrl: "",
   opts: {
     clientId: GUEST_CLIENT_ID,
@@ -246,7 +245,7 @@ class MqttService {
     /** Event */ MqttEvent,
     /** Listener */ Set<Callable>
   >();
-  private __sharedTransport = dummyTransport;
+  private __sharedTransport = dummyTransport as Transport;
   private __env: IMSTDependence;
   private __workers = new Set<MqttServiceWorker>();
   private __state = MqttServiceState.Created;
@@ -324,6 +323,7 @@ class MqttService {
       ])
     );
 
+    // TODO 此处不仅仅包含了Socket（TCP/IP网络层的那个Socket）的错误，也有Mqtt packet解析错误等异常
     // TODO 接下来我们需要做的是，处理各种情况下的error，保持mqtt连接能正常工作
     // TODO 断开过长时间，API会把mqtt topic关闭，这时候需要重新fetchClientId，重新subscribe
     // this.__builtInListeners.set(
@@ -331,7 +331,35 @@ class MqttService {
     //   new Set([
     //     {
     //       thisArg: this,
-    //       func: () => {},
+    //       func: (...args) => {
+    //         const [error] = args;
+
+    //         const routines = {
+    //           [MqttError.ECONNREFUSED]: (e: any) => {
+    //             console.error('MqttService error', e);
+    //           },
+    //           [MqttError.EADDRINUSE]: (e: any) => {
+    //             console.error('MqttService error', e);
+    //           },
+    //           [MqttError.ECONNRESET]: (e: any) => {
+    //             console.error('MqttService error', e);
+    //           },
+    //           [MqttError.ENOTFOUND]: (e: any) => {
+    //             console.error('MqttService error', e);
+    //           },
+    //           [MqttError.ETIMEDOUT]: (e: any) => {
+    //             console.error('MqttService error', e);
+    //           },
+    //         };
+    //         // error.code可能是null 或者 undefined
+    //         const routine = routines[error.code];
+    //         if (!isFunction(routine)) {
+    //           console.error('MqttService error', error);
+    //           return;
+    //         }
+
+    //         routine(error);
+    //       },
     //     },
     //   ]),
     // );
@@ -387,7 +415,7 @@ class MqttService {
       });
 
       resolve(
-        Transport.create({
+        MqttTransport.create({
           brokerUrl,
           opts,
         })
