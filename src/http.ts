@@ -1,15 +1,8 @@
-import { getDemoModePort } from "@platform/utils/demo-mode";
-import type { AxiosRequestConfig, AxiosResponse, Canceler } from "axios";
-import axios from "axios";
-import {
-  forEach,
-  isFunction,
-  isNil,
-  isNumber,
-  isObject,
-  isString,
-} from "lodash";
-import HashAlgorithm from "md5.js";
+import { getDemoModePort } from '@platform/utils/demo-mode';
+import type { AxiosRequestConfig, AxiosResponse, Canceler } from 'axios';
+import axios from 'axios';
+import { forEach, isFunction, isNil, isNumber, isObject, isString } from 'lodash';
+import HashAlgorithm from 'md5.js';
 
 interface APIResponse<T = unknown> {
   /** 自定义业务响应码 */
@@ -43,27 +36,27 @@ interface IHttp {
   get: <T = unknown>(
     url: string,
     parameters?: Record<string, unknown>,
-    extraConfig?: ExtraConfig
+    extraConfig?: ExtraConfig,
   ) => Promise<APIResponse<T>>;
   delete: <T = unknown>(
     url: string,
     parameters?: Record<string, unknown>,
-    extraConfig?: ExtraConfig
+    extraConfig?: ExtraConfig,
   ) => Promise<APIResponse<T>>;
   patch: <T = unknown>(
     url: string,
     parameters?: Record<string, unknown>,
-    extraConfig?: ExtraConfig
+    extraConfig?: ExtraConfig,
   ) => Promise<APIResponse<T>>;
   post: <T = unknown>(
     url: string,
     parameters?: Record<string, unknown>,
-    extraConfig?: ExtraConfig
+    extraConfig?: ExtraConfig,
   ) => Promise<APIResponse<T>>;
   put: <T = unknown>(
     url: string,
     parameters?: Record<string, unknown>,
-    extraConfig?: ExtraConfig
+    extraConfig?: ExtraConfig,
   ) => Promise<APIResponse<T>>;
 }
 
@@ -85,10 +78,7 @@ type ExtraConfig = Partial<{
   /**
    * 除了'access-token' | 'terminal' | 'token'之外，额外添加的HTTP请求头，
    */
-  headers: Record<
-    Exclude<string, "access-token" | "terminal" | "token">,
-    string
-  >;
+  headers: Record<Exclude<string, 'access-token' | 'terminal' | 'token'>, string>;
   /**
    * 是否隐藏请求URL中的随机时间戳（这个随机时间戳用于防止API缓存）
    */
@@ -133,13 +123,7 @@ type ExtraConfig = Partial<{
   // `responseType` indicates the type of data that the server will respond with
   // options are: 'arraybuffer', 'document', 'json', 'text', 'stream'
   // browser only: 'blob'
-  responseType:
-    | "arraybuffer"
-    | "blob"
-    | "document"
-    | "json"
-    | "text"
-    | "stream";
+  responseType: 'arraybuffer' | 'blob' | 'document' | 'json' | 'text' | 'stream';
   /**
    * 请求超时，默认值是1000*50
    */
@@ -225,74 +209,98 @@ type ExtraConfig = Partial<{
 }>;
 
 type SyncBeforeRequestMiddleware = (
-  method: "get" | "delete" | "patch" | "post" | "put",
+  method: 'get' | 'delete' | 'patch' | 'post' | 'put',
   url: string,
   parameters: Record<string, unknown>,
-  extraConfig: ExtraConfig
+  extraConfig: ExtraConfig,
 ) => boolean | void;
 type AsyncBeforeRequestMiddleware = (
-  method: "get" | "delete" | "patch" | "post" | "put",
+  method: 'get' | 'delete' | 'patch' | 'post' | 'put',
   url: string,
   parameters: Record<string, unknown>,
-  extraConfig: ExtraConfig
+  extraConfig: ExtraConfig,
 ) => Promise<boolean | void>;
-type BeforeRequestMiddleware =
-  | SyncBeforeRequestMiddleware
-  | AsyncBeforeRequestMiddleware;
+type BeforeRequestMiddleware = SyncBeforeRequestMiddleware | AsyncBeforeRequestMiddleware;
 
 type SyncAfterReturningMiddleware = (
   data: APIResponse<any>,
-  extraConfig: ExtraConfig
+  extraConfig: ExtraConfig,
 ) => boolean | void;
 type AsyncAfterReturningMiddleware = (
   data: APIResponse<any>,
-  extraConfig: ExtraConfig
+  extraConfig: ExtraConfig,
 ) => Promise<boolean | void>;
-type AfterReturningMiddleware =
-  | SyncAfterReturningMiddleware
-  | AsyncAfterReturningMiddleware;
+type AfterReturningMiddleware = SyncAfterReturningMiddleware | AsyncAfterReturningMiddleware;
 
 function isPromise(obj: any): boolean {
   return (
     !!obj &&
-    (typeof obj === "object" || typeof obj === "function") &&
-    typeof obj.then === "function"
+    (typeof obj === 'object' || typeof obj === 'function') &&
+    typeof obj.then === 'function'
   );
 }
 
 function isAPIResponse(sn: any) {
   const isObj = isObject(sn);
   const hasCode = isNumber(sn.code);
-  const hasData = sn.hasOwnProperty("data");
+  const hasData = sn.hasOwnProperty('data');
   const hasDesc = isString(sn.desc);
 
   return isObj && hasCode && hasData && hasDesc;
 }
 
 const AXIOS_HTTP_TIMEOUT = 1000 * 50;
-const FAKE_HTTP_REQUEST_HASH = "21febc4b-a082-42c5-93ee-4ed1ee18df8d";
+const FAKE_HTTP_REQUEST_HASH = '21febc4b-a082-42c5-93ee-4ed1ee18df8d';
 const MAX_WAIT_MS = 500; /** ms */
 const PREFIX_HASH = {
-  building: "building",
+  ai: 'ai',
+  alarm: 'alarm',
+  attendance: 'attendance',
+  auth: 'auth',
+  boss: 'boss',
+  building: 'building',
+  campus: 'campus',
+  campusbase: 'campusbase',
+  car: 'car',
+  connector: 'connector',
+  controller: 'controller',
+  data: 'data',
+  device: 'device',
+  file: 'file',
+  jeecgboot: 'jeecgboot',
+  openapi: 'openapi',
+  ops: 'ops',
+  portal: 'portal',
+  privacy: 'privacy',
+  product: 'product',
+  quality: 'quality',
+  sas: 'sas',
+  space: 'space',
+  strategy: 'strategy',
+  venue: 'venue',
+  attendance: 'attendance',
+  jeecgboot: 'jeecgboot',
+  ioc: 'ioc',
+  flow: 'flow',
 };
 
 const ApiError = {
   busy: {
     code: -1,
-    desc: "服务繁忙，稍后重试",
+    desc: '服务繁忙，稍后重试',
   },
   canceledByUser: {
     code: -1,
-    desc: "用户取消了请求",
+    desc: '用户取消了请求',
   },
   forbidden: {
     code: 600057,
-    desc: "无权限访问，请重新登录",
+    desc: '无权限访问，请重新登录',
   },
 };
 
 function removeNullOrUndefinedProperties(
-  parameters: Record<string, unknown> = {}
+  parameters: Record<string, unknown> = {},
 ): NonNullable<Record<string, unknown>> {
   const data: NonNullable<Record<string, unknown>> = {};
   forEach(parameters, (v, k) => {
@@ -316,21 +324,17 @@ class AxiosHttpService {
       useApi2: boolean;
     } = {
       useApi2: false,
-    }
+    },
   ): AxiosHttpService {
     const { accessToken, language, useApi2 } = config;
     return new AxiosHttpService(
       accessToken ? accessToken : null,
       language ? language : null,
-      useApi2
+      useApi2,
     );
   }
 
-  constructor(
-    accessToken: string | null,
-    language: string | null,
-    useApi2: boolean = false
-  ) {
+  constructor(accessToken: string | null, language: string | null, useApi2: boolean = false) {
     this.accessToken = accessToken;
     this.language = language;
     this.useApi2 = useApi2;
@@ -352,7 +356,7 @@ class AxiosHttpService {
       onUploadProgress,
     } = extraConfig;
     const axiosInstance = axios.create({
-      baseURL: useApi2 === true ? "/api2" : "/api",
+      baseURL: useApi2 === true ? '/api2' : '/api',
       timeout: isNumber(timeout) && timeout >= 0 ? timeout : AXIOS_HTTP_TIMEOUT,
     });
 
@@ -365,7 +369,7 @@ class AxiosHttpService {
 
       if (!isNil(accessToken)) {
         requestConfig.headers.token = accessToken;
-        requestConfig.headers["access-token"] = accessToken;
+        requestConfig.headers['access-token'] = accessToken;
       }
 
       if (!isNil(headers)) {
@@ -374,11 +378,9 @@ class AxiosHttpService {
         });
       }
 
-      requestConfig.responseType = isNil(responseType) ? "json" : responseType;
+      requestConfig.responseType = isNil(responseType) ? 'json' : responseType;
 
-      const terminal = /(iphone|ipad|android)/gi.test(navigator.appVersion)
-        ? "APP"
-        : "WEB";
+      const terminal = /(iphone|ipad|android)/gi.test(navigator.appVersion) ? 'APP' : 'WEB';
       requestConfig.headers.terminal = terminal;
 
       if (mock) {
@@ -386,17 +388,17 @@ class AxiosHttpService {
       }
 
       if (apiChange && !mock) {
-        const prefixKey = apiChange || "building";
+        const prefixKey = apiChange || 'building';
         // @ts-ignore
         const prefix = PREFIX_HASH[prefixKey] || PREFIX_HASH.building;
-        requestConfig.baseURL = "/api";
+        requestConfig.baseURL = '/api';
         requestConfig.url = `/${prefix}${requestConfig.url}`;
       }
 
       // TODO requestConfig.url 有可能为undefined吗？
       if (hideTimes !== true) {
         requestConfig.url = `${requestConfig.url}${
-          requestConfig.url!.indexOf("?") >= 0 ? "&" : "?"
+          requestConfig.url!.indexOf('?') >= 0 ? '&' : '?'
         }_r=${Math.random()}`;
       }
 
@@ -417,22 +419,19 @@ class AxiosHttpService {
 
     const onRequestRejected = (error: any) => Promise.reject(error);
 
-    axiosInstance.interceptors.request.use(
-      onRequestFulfilled,
-      onRequestRejected
-    );
+    axiosInstance.interceptors.request.use(onRequestFulfilled, onRequestRejected);
 
     return axiosInstance;
   }
 
   async call<T = unknown>(
-    method: "get" | "delete" | "patch" | "post" | "put",
+    method: 'get' | 'delete' | 'patch' | 'post' | 'put',
     url: string,
     parameters: Record<string, unknown>,
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ): Promise<AxiosResponse<APIResponse<T>>> {
     const client = this.__createClient(extraConfig);
-    const usingParams = new Set(["delete", "get"]).has(method);
+    const usingParams = new Set(['delete', 'get']).has(method);
 
     let data: Blob | FormData | Record<string, unknown> = parameters;
     if (!usingParams && extraConfig.usingFormData === true) {
@@ -452,11 +451,7 @@ class AxiosHttpService {
             })();
     }
 
-    if (
-      !usingParams &&
-      extraConfig.usingBlob === true &&
-      parameters.blob instanceof Blob
-    ) {
+    if (!usingParams && extraConfig.usingBlob === true && parameters.blob instanceof Blob) {
       data = parameters.blob;
     }
 
@@ -481,7 +476,7 @@ class AxiosHttpService {
  * @param request
  */
 function __hash(request: {
-  method: "get" | "delete" | "patch" | "post" | "put";
+  method: 'get' | 'delete' | 'patch' | 'post' | 'put';
   url: string;
   parameters: Record<string, unknown>;
   extraConfig: ExtraConfig;
@@ -489,27 +484,24 @@ function __hash(request: {
   function __doHash(str: string): string {
     const algorithm = new HashAlgorithm();
     algorithm.end(str);
-    return algorithm.read().toString("hex");
+    return algorithm.read().toString('hex');
   }
 
   return __doHash(JSON.stringify(request));
 }
 
 function __isHTTPGetMethod(method: string) {
-  return method.toLowerCase() === "get";
+  return method.toLowerCase() === 'get';
 }
 
-function __matchParams(
-  data: Record<string, any>,
-  params: Record<string, any> = {}
-) {
+function __matchParams(data: Record<string, any>, params: Record<string, any> = {}) {
   const { default: defaultData, ...restData } = data;
   let matchData = null;
   forEach(restData, (val, key) => {
     const keyQuery: Record<string, any> = {};
     let isMatch = true;
-    key.split("&").forEach((pair) => {
-      const [k, v] = pair.split("=");
+    key.split('&').forEach(pair => {
+      const [k, v] = pair.split('=');
       keyQuery[k] = v;
       if (v !== String(params[k])) {
         isMatch = false;
@@ -533,7 +525,7 @@ class AxiosHttp implements IHttp {
       useApi2: boolean;
     } = {
       useApi2: false,
-    }
+    },
   ) {
     return new AxiosHttp(config);
   }
@@ -563,7 +555,7 @@ class AxiosHttp implements IHttp {
       useApi2: boolean;
     } = {
       useApi2: false,
-    }
+    },
   ) {
     this.__service = AxiosHttpService.create(config);
   }
@@ -601,16 +593,12 @@ class AxiosHttp implements IHttp {
     if (!isPromise(middleware)) {
       this.__middleware.afterReturning.push(
         (data: APIResponse<any>, extraConfig: ExtraConfig) =>
-          new Promise<boolean | void>((resolve) => {
-            resolve(
-              (middleware as SyncAfterReturningMiddleware)(data, extraConfig)
-            );
-          })
+          new Promise<boolean | void>(resolve => {
+            resolve((middleware as SyncAfterReturningMiddleware)(data, extraConfig));
+          }),
       );
     } else {
-      this.__middleware.afterReturning.push(
-        middleware as AsyncAfterReturningMiddleware
-      );
+      this.__middleware.afterReturning.push(middleware as AsyncAfterReturningMiddleware);
     }
   }
 
@@ -647,21 +635,14 @@ class AxiosHttp implements IHttp {
     if (!isPromise(middleware)) {
       this.__middleware.beforeRequest.push(
         (method, url, parameters, extraConfig) =>
-          new Promise<boolean | void>((resolve) => {
+          new Promise<boolean | void>(resolve => {
             resolve(
-              (middleware as SyncBeforeRequestMiddleware)(
-                method,
-                url,
-                parameters,
-                extraConfig
-              )
+              (middleware as SyncBeforeRequestMiddleware)(method, url, parameters, extraConfig),
             );
-          })
+          }),
       );
     } else {
-      this.__middleware.beforeRequest.push(
-        middleware as AsyncBeforeRequestMiddleware
-      );
+      this.__middleware.beforeRequest.push(middleware as AsyncBeforeRequestMiddleware);
     }
   }
 
@@ -669,7 +650,7 @@ class AxiosHttp implements IHttp {
     /** Request Object Hash */
     requestHash: string,
     /** Axios instance */
-    promise: Promise<any>
+    promise: Promise<any>,
   ) {
     this.__httpRequestCache.set(requestHash, {
       createdAt: Date.now(),
@@ -678,28 +659,24 @@ class AxiosHttp implements IHttp {
   }
 
   private async __call<T = unknown>(
-    method: "get" | "delete" | "patch" | "post" | "put",
+    method: 'get' | 'delete' | 'patch' | 'post' | 'put',
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ): Promise<APIResponse<T>> {
     /**
      * 获取演示数据
      *
      * @deprecated 自从有了大屏设计器，我们就不需要在API层面使用演示数据了
      */
-    const __fetchDemoData = async (
-      port: string
-    ): Promise<APIResponse<T | null>> => {
+    const __fetchDemoData = async (port: string): Promise<APIResponse<T | null>> => {
       const { demoUrl } = extraConfig;
       const baseUrl =
-        port === "sample"
-          ? `${window.location.origin}/sample`
-          : `http://127.0.0.1:${port}`;
+        port === 'sample' ? `${window.location.origin}/sample` : `http://127.0.0.1:${port}`;
       const params = removeNullOrUndefinedProperties(parameters);
       try {
         const { data } = await axios({
-          method: "get",
+          method: 'get',
           params: params,
           url: `${baseUrl}${demoUrl || url}.json`,
         });
@@ -708,21 +685,21 @@ class AxiosHttp implements IHttp {
           ? {
               code: 200,
               data: null,
-              desc: "",
+              desc: '',
             }
           : {
               code: 200,
               data: matchData as T,
-              desc: "",
+              desc: '',
             };
       } catch (e) {
-        console.log("加载本地数据出错......");
+        console.log('加载本地数据出错......');
       }
 
       return {
         code: 200,
         data: null,
-        desc: "",
+        desc: '',
       };
     };
 
@@ -793,12 +770,7 @@ class AxiosHttp implements IHttp {
       const shouldThrows = extraConfig.isCatch === false;
       try {
         // 使用Axios库，发起HTTP请求
-        const axiosResponse = await this.__service.call<T>(
-          method,
-          url,
-          params,
-          extraConfig
-        );
+        const axiosResponse = await this.__service.call<T>(method, url, params, extraConfig);
         // API业务响应
         const apiResponse = axiosResponse.data;
 
@@ -859,9 +831,7 @@ class AxiosHttp implements IHttp {
               };
 
           // API返回异常
-          return shouldThrows
-            ? Promise.reject(exception)
-            : Promise.resolve(exception);
+          return shouldThrows ? Promise.reject(exception) : Promise.resolve(exception);
         }
 
         // 应用服务器返回的异常，比如应用服务器返回404错误
@@ -930,41 +900,41 @@ class AxiosHttp implements IHttp {
   async get<T = unknown>(
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ) {
-    return await this.__call<T>("get", url, parameters, extraConfig);
+    return await this.__call<T>('get', url, parameters, extraConfig);
   }
 
   async delete<T = unknown>(
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ) {
-    return this.__call<T>("delete", url, parameters, extraConfig);
+    return this.__call<T>('delete', url, parameters, extraConfig);
   }
 
   async patch<T = unknown>(
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ) {
-    return this.__call<T>("get", url, parameters, extraConfig);
+    return this.__call<T>('get', url, parameters, extraConfig);
   }
 
   async post<T = unknown>(
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ) {
-    return this.__call<T>("post", url, parameters, extraConfig);
+    return this.__call<T>('post', url, parameters, extraConfig);
   }
 
   async put<T = unknown>(
     url: string,
     parameters: Record<string, unknown> = {},
-    extraConfig: ExtraConfig = {}
+    extraConfig: ExtraConfig = {},
   ) {
-    return this.__call<T>("put", url, parameters, extraConfig);
+    return this.__call<T>('put', url, parameters, extraConfig);
   }
 }
 

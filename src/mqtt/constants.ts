@@ -1,3 +1,13 @@
+import type {
+  CloseCallback,
+  IClientOptions,
+  IClientPublishOptions,
+  IClientSubscribeOptions,
+  PacketCallback,
+} from "mqtt";
+
+import type { Business } from "./business";
+
 /**
  * 用于生成最终的Mqtt Topic
  *
@@ -69,6 +79,11 @@ enum MqttEvent {
   PacketReceive = "packetreceive",
 }
 
+enum TransportEvent {
+  SubscribeReject = "SubscribeReject",
+  SubscribeResolve = "SubscribeResolve",
+}
+
 /**
  * MQTT QoS Levels
  *
@@ -135,6 +150,53 @@ const KnownMqttEvents = [
   MqttEvent.PacketReceive,
 ];
 
+/**
+ * MqttService状态
+ *
+ * @remarks
+ *
+ * 状态转换如下
+ *
+ * **MqttService.init()**
+ *
+ * __MqttServiceState.Created
+ *   -> __MqttServiceState.Initializing
+ *     -> __MqttServiceState.Running
+ *
+ * **MqttService.suspend()**
+ *
+ * __MqttServiceState.Running
+ *   -> __MqttServiceState.Suspending
+ *     -> __MqttServiceState.Suspended
+ *
+ * **MqttService.resume()**
+ *
+ * __MqttServiceState.Suspended
+ *   -> __MqttServiceState.Resuming
+ *     -> __MqttServiceState.Running
+ *
+ * **MqttService.exit()**
+ *
+ * __MqttServiceState.Running
+ *   -> __MqttServiceState.Stopping
+ *     -> __MqttServiceState.Created
+ *
+ * **MqttService.kill()**
+ *
+ * __MqttServiceState.Running
+ *   -> __MqttServiceState.Stopping
+ *     -> __MqttServiceState.Created
+ */
+enum MqttServiceState {
+  Created,
+  Initializing,
+  Resuming,
+  Suspending,
+  Stopping,
+  Suspended,
+  Running,
+}
+
 type Callable = {
   /**
    * 在 func 函数运行时使用的 this 值。请注意，this 可能不是该方法看到的实际值：如果这个函数处于非严格模式下，则指定为 null 或 undefined 时会自动替换为指向全局对象，原始值会被包装。
@@ -156,17 +218,184 @@ type MqttPayload = {
   srcAddr: string;
 };
 
+type ClientOptions = IClientOptions & {
+  clientId: string;
+  password: string;
+};
+
+/**
+ * Transport接口，规定了Transport要实现的属性和方法
+ *
+ * @remarks
+ *
+ * 这样做的好处是，我们的service以及worker依赖的是抽象的接口，目前的实现是MqttTransport，后面我们完善可以使用SharedWorker实现另一套Transport
+ *
+ * @see [Run websocket in web worker or service worker - javascript](https://stackoverflow.com/questions/61865890/run-websocket-in-web-worker-or-service-worker-javascript)
+ */
+interface ITransport {
+  readonly brokerUrl: string;
+  readonly clientId: string;
+  readonly connected: boolean;
+  readonly isGuest: boolean;
+  readonly reconnecting: boolean;
+  readonly topics: string[];
+  addEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable: Callable
+  ) => void;
+  connect: () => void;
+  dispose: () => void;
+  dispatchEvent: (event: MqttEvent | TransportEvent, args: any[]) => void;
+  end: (force?: boolean, opts?: Object, cb?: CloseCallback) => void;
+  getSubject: (mqttTopic: string) => string | null;
+  getTopic: (subject: string) => string;
+  /**
+   * @remarks
+   *
+   * 在我编写这一版本的Mqtt模块的时候，publish这个功能基本上没用，不确定后续是否会用上
+   */
+  publish: (
+    topic: string,
+    message: string,
+    opts?: IClientPublishOptions,
+    callback?: PacketCallback
+  ) => void;
+  reconnect: () => void;
+  removeEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable?: Callable
+  ) => void;
+  subscribe: (
+    topic: string | string[],
+    options?: IClientSubscribeOptions
+  ) => void;
+  unsubscribe: (
+    topic: string | string[],
+    opts?: Object,
+    callback?: PacketCallback
+  ) => void;
+}
+
+interface IMqttServiceWorker {
+  readonly connected: boolean;
+  readonly follows: Business[];
+  readonly id: string;
+  readonly isGuest: boolean;
+  readonly messages: Map<string, MqttPayload>;
+  readonly reconnecting: boolean;
+  readonly transport: ITransport;
+  addEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable: Callable
+  ) => void;
+  forceQuit: () => Promise<void>;
+  quit: () => Promise<void>;
+  getBusiness: (id: string) => Business | undefined;
+  isWatching: (f: Business) => boolean;
+  letApiKnowIAmInterested: (f: Business) => Promise<void>;
+  letApiKnowIAmNotInterested: (f: Business) => Promise<void>;
+  removeEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable?: Callable
+  ) => void;
+  send: () => void;
+  unwatch: (f: Business) => Promise<void>;
+  watch: (f: Business) => Promise<void>;
+}
+
+interface IMqttService {
+  readonly dummyWorker: any;
+  readonly isGuest: boolean;
+  readonly isReady: boolean;
+  readonly state: MqttServiceState;
+  readonly suspendWhenBrowserTabHidden: boolean;
+  addEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable: Callable
+  ) => void;
+  createTransport: () => Promise<ITransport>;
+  createWorker: (transport?: ITransport) => IMqttServiceWorker;
+  quit: () => Promise<void>;
+  getClientId: () => Promise<string>;
+  getBrokerUrl: () => Promise<string>;
+  getClientOptions: (customized: {
+    clientId: string;
+    password: string;
+    token: string;
+  }) => ClientOptions;
+  init: () => Promise<void>;
+  forceQuit: () => Promise<void>;
+  resume: () => void;
+  removeEventListener: (
+    event: MqttEvent | TransportEvent,
+    callable?: Callable
+  ) => void;
+  removeWorker: (worker: IMqttServiceWorker) => Promise<void>;
+  removeWorkers: () => Promise<void>;
+  suspend: () => void;
+}
+
+type TransportBuilder = {
+  /**
+   * 浏览器页面处于hidden的情况下，也就是：
+   * const isDocumentVisible = document.visibilityState === 'visible';
+   * 是否结束当前Mqtt链接，以减轻Broker服务端压力
+   */
+  suspendWhenBrowserTabHidden: boolean;
+  /**
+   * 是否共享同一个Mqtt client id
+   *
+   * @remarks
+   *
+   * - 如果使用的是经典的MqttTransport，那么多个browser tab，每一个tab都应该调用去获取各自的client id
+   * - 如果使用的是SharedWorkerTransport，那么多个browser tab，连接的都是同一个SharedWorkerTransport，因此共享同一个client id
+   */
+  useSharedClientId: boolean;
+  /**
+   * 构造Transport
+   */
+  build: (connection: { brokerUrl: string; opts: ClientOptions }) => ITransport;
+  /**
+   * 构建完Transport之后的回调函数
+   */
+  postBuild: (service: IMqttService, transport: ITransport) => void;
+};
+
+const CK_MQTT_PASSWORD = "mqttPassword";
+const CK_ACCESS_TOKEN = "token";
+const CK_MQTT_CLIENT_ID = "clientId";
+const CK_MQTT_UUID = "mqttUuid";
+const CK_MQTT_HOST = "mqttHost";
+const CK_MQTT_HOST_PROTOCOL = "mqttHostProtocol";
+const CK_WATCHED_BUSINESS_PREFIX = "mqttWatchedBiz_";
+
 export {
+  CK_ACCESS_TOKEN,
+  CK_MQTT_CLIENT_ID,
+  CK_MQTT_HOST,
+  CK_MQTT_HOST_PROTOCOL,
+  CK_MQTT_PASSWORD,
+  CK_MQTT_UUID,
+  CK_WATCHED_BUSINESS_PREFIX,
   GUEST_CLIENT_ID,
   KnownMqttEvents,
   MqttSocketError,
   MqttEvent,
   MqttQoS,
   MqttPayload,
+  MqttServiceState,
   TOPIC,
   TOPIC_HEADER,
   TOPIC_VERSION,
+  TransportEvent,
   IMP_WEB_SUBJECT,
   IMP_WEB_SUBJECT_THAT_NEEDS_NO_BID,
 };
-export type { Callable };
+export type {
+  Callable,
+  ClientOptions,
+  ITransport,
+  TransportBuilder,
+  IMqttService,
+  IMqttServiceWorker,
+};

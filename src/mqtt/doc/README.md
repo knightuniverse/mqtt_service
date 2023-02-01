@@ -1,12 +1,105 @@
+- [整体设计](#整体设计)
+  - [Classical](#classical)
+  - [SharedWorker](#sharedworker)
+  - [结论](#结论)
+- [核心类型](#核心类型)
+- [React 组件](#react-组件)
+  - [Debug](#debug)
+
 ## 整体设计
 
 ![系统设计](./MQTT.png)
+
+**MqttService是单例模式，每个BrowserTab有且仅有一个MqttService实例。MqttService负责创建MqttServiceWorker实例，而每个React组件都有自己对应的MqttServiceWorker。**
+
+**默认情况下，MqttService会创建一个共享的Transport，所有的MqttServiceWorker复用这个Transport。**
+
+**目前我们支持两种不同类型的Transport，分别是：**
+
+- ClassicalTransport
+- SharedWorkerTransport
+
+### Classical
+
+在经典模式下，一个Browser tab只有一个MqttService对象实例，MqttService会创建一个共享的MqttTransport，MqttTransport创建一个MqttClient。经典模式下，每个Browser tab各自维护自己的MqttClient ID。
+
+
+依赖关系如下所示：
+
+```
+BrowserTab -> MqttService -> MqttTransport -> MqttClient
+```
+
+整个体系的逻辑结构如下：
+
+```
+        |- BrowserTab -> MqttService -> MqttTransport -> MqttClient
+Browser |- BrowserTab -> MqttService -> MqttTransport -> MqttClient
+        |- BrowserTab -> MqttService -> MqttTransport -> MqttClient
+```
+
+消息流如下：
+
+```
+        |- BrowserTab <- MqttService <- MqttTransport <- MqttClient
+Browser |- BrowserTab <- MqttService <- MqttTransport <- MqttClient
+        |- BrowserTab <- MqttService <- MqttTransport <- MqttClient
+```
+
+每个React组件都有自己对应的MqttServiceWorker：
+
+
+```
+                       |-> MqttServiceWorker
+WebPage |- MqttService |-> MqttServiceWorker
+                       |-> MqttServiceWorker
+```
+
+### SharedWorker
+
+在基于SharedWorker的模式中，一个Browser tab只有一个MqttService对象实例，MqttService会创建一个共享的SharedWorkerTransport，SharedWorkerTransport则会创建一个SharedWorker
+
+依赖关系如下所示：
+
+```
+BrowserTab -> MqttService -> SharedWorkerTransport -> SharedWorker
+```
+
+整个体系的逻辑结构如下：
+
+```
+        |- BrowserTab -> MqttService -> SharedWorkerTransport -|
+Browser |- BrowserTab -> MqttService -> SharedWorkerTransport -|-> SharedWorker
+        |- BrowserTab -> MqttService -> SharedWorkerTransport -|
+```
+
+消息流如下：
+
+```
+        |- BrowserTab <- MqttService <- SharedWorkerTransport <-|
+Browser |- BrowserTab <- MqttService <- SharedWorkerTransport <-|- SharedWorker
+        |- BrowserTab <- MqttService <- SharedWorkerTransport <-|
+```
+
+每个React组件都有自己对应的MqttServiceWorker：
+
+```
+                       |-> MqttServiceWorker
+WebPage |- MqttService |-> MqttServiceWorker
+                       |-> MqttServiceWorker
+```
+
+### 结论
+
+- Classical模式下，服务端的压力较大，需要给每个Browser tab创建client id，订阅并且推送消息。
+- SharedWorker模式下，服务端压力较小，所有Browser tab共享同一个client id。
 
 ## 核心类型
 
 1. MqttService
 2. MqttServiceWorker
 3. Transport
+4. BusinessReferenceManager
 
 **MqttService**
 
@@ -167,3 +260,50 @@ withMqttService，主要职责：
 **代码文件**
 
 projects\platform\src\components\with_mqtt_service\index.tsx
+
+### Debug
+
+**Classical**
+
+略，直接上控制台Debug
+
+**SharedWorker**
+
+[Debugging Web Workers](https://lihautan.com/Debugging%20web%20workers/)
+
+**BusinessReferenceManager**
+
+当前MQTT的设计当中，支持两种模式，分别是：
+
+- Classical
+- SharedWorker
+
+但是不论时哪一种情况下，都会有这么一个场景：
+
+
+```ts
+Browser
+  |-BrowserTab
+    |-Frame(aka projects\platform\src\components\Layout\frame\frame.tsx)
+      |-Page A
+        |-Component AA
+        |-Component BB
+        |-Component CC
+```
+
+BrowserTab持有全局单例的MqttService实例，每个Component AA则会由MqttService分配自己专享的MqttServiceWorker。
+
+AA和BB都关注了同一个subject的Business，他们的bid可能相同或者不同。
+
+**bid相同**
+
+如果AA从UI上移除，此时与AA组件绑定的MqttServiceWorker调用unwatch方法，通知API取消关注业务反馈，并且通知MqttService回收和AA组件绑定的MqttServiceWorker。
+ 此时由于API不再推送相关业务的消息，BB组件就会受到影响。
+
+**bid不同**
+
+这个时候Broker推送的消息，AA和BB都会接收到，因为无法根据bid进行区分是不是属于自己的消息。
+
+我们必须决定什么样的时机，可以调用API，通知服务端不必再推送相关的消息。这个时机，就是当subject|bid构成的business对象引用数量为0的时候。
+
+BusinessReferenceManager就是干这个工作的。

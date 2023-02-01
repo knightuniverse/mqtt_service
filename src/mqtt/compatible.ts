@@ -105,9 +105,9 @@ function transformTopic(subject: string) {
   return subject2ReduxStateName(subject);
 }
 
-// TODO 找老樊问清楚，这个函数实现什么功能？
 /**
- *
+ * 只是注入给应用层，永远是一个对象，防止其他的业务端点访问报错
+ * @deprecated 新的MQTT实现，至少会返回一个空的对象给业务层
  * @param mqttJSON
  * @param reduxStateName
  * @param preMqttJSON

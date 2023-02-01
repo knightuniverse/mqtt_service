@@ -3,24 +3,84 @@ import { each, isNil } from "lodash";
 import type { IMSTDependence } from "@platform/core/infra";
 import { DRAFT_ID, PREFIX_HASH } from "@platform/core/infra";
 
-import type { Callable } from "./constants";
+import type {
+  Callable,
+  ClientOptions,
+  IMqttService,
+  IMqttServiceWorker,
+  ITransport,
+  TransportBuilder,
+  TransportEvent,
+} from "./constants";
 import {
+  CK_ACCESS_TOKEN,
+  CK_MQTT_CLIENT_ID,
+  CK_MQTT_HOST,
+  CK_MQTT_HOST_PROTOCOL,
+  CK_MQTT_PASSWORD,
+  CK_MQTT_UUID,
   GUEST_CLIENT_ID,
   KnownMqttEvents,
   MqttEvent,
   MqttQoS,
+  MqttServiceState,
   TOPIC,
 } from "./constants";
-import type { ClientOptions, Transport } from "./transport";
-import { MqttTransport } from "./transport";
-import { formatDate, getSeq } from "./utils";
 import {
   DRAFT_MQTT_SERVICE_WORKER_ID,
   MqttServiceWorker,
   uniqueWorkerId,
-} from "./worker";
+} from "./mqtt_service_worker";
+import { BusinessReferenceManager } from "./reference_manager";
+import { ClassicalTransport, SharedWorkerTransport } from "./transport";
+import { formatDate, getSeq } from "./utils";
 
-const dummyTransport = MqttTransport.create({
+/**
+ * imp-web目前支持的transport builder
+ */
+const SUPPORTED_TRANSPORT_BUILDER: Record<
+  "classical" | "sharedWorker",
+  TransportBuilder
+> = {
+  classical: {
+    suspendWhenBrowserTabHidden: true,
+    useSharedClientId: false,
+    build: (conn) => ClassicalTransport.create(conn),
+    /**
+     * @param service
+     * @param transport
+     * @remarks
+     * 当用户关闭Browser Tab，要清理BusinessReferenceManager对应的引用计数。
+     * 此举是为了避免因为引用技术错误，导致某一项Business引用数量为 0 的情况下，没有及时通知服务端不再推送相关消息。
+     */
+    postBuild: (service) => {
+      async function __handleBeforeWindowUnload() {
+        await service.quit();
+      }
+      window.addEventListener("beforeunload", __handleBeforeWindowUnload);
+    },
+  },
+  sharedWorker: {
+    suspendWhenBrowserTabHidden: false,
+    useSharedClientId: true,
+    build: (conn) => SharedWorkerTransport.create(conn),
+    /**
+     * @param service
+     * @param transport
+     * @remarks
+     * 当用户关闭Browser Tab，要清理BusinessReferenceManager对应的引用计数。
+     * 此举是为了避免因为引用技术错误，导致某一项Business引用数量为 0 的情况下，没有及时通知服务端不再推送相关消息。
+     */
+    postBuild: (service) => {
+      async function __handleBeforeWindowUnload() {
+        await service.quit();
+      }
+      window.addEventListener("beforeunload", __handleBeforeWindowUnload);
+    },
+  },
+};
+
+const dummyTransport = ClassicalTransport.create({
   brokerUrl: "",
   opts: {
     clientId: GUEST_CLIENT_ID,
@@ -38,53 +98,6 @@ function getWindowPathPrefix(isTrimLine = false) {
   const prefix = window.PATH_PREFIX === "platform" ? "" : window.PATH_PREFIX;
   const pathPrefix = prefix && `/${prefix}`;
   return isTrimLine ? prefix : pathPrefix;
-}
-
-/**
- * MqttService状态
- *
- * @remarks
- *
- * 状态转换如下
- *
- * **MqttService.init()**
- *
- * __MqttServiceState.Created
- *   -> __MqttServiceState.Initializing
- *     -> __MqttServiceState.Running
- *
- * **MqttService.suspend()**
- *
- * __MqttServiceState.Running
- *   -> __MqttServiceState.Suspending
- *     -> __MqttServiceState.Suspended
- *
- * **MqttService.resume()**
- *
- * __MqttServiceState.Suspended
- *   -> __MqttServiceState.Resuming
- *     -> __MqttServiceState.Running
- *
- * **MqttService.exit()**
- *
- * __MqttServiceState.Running
- *   -> __MqttServiceState.Stopping
- *     -> __MqttServiceState.Created
- *
- * **MqttService.kill()**
- *
- * __MqttServiceState.Running
- *   -> __MqttServiceState.Stopping
- *     -> __MqttServiceState.Created
- */
-enum MqttServiceState {
-  Created,
-  Initializing,
-  Resuming,
-  Suspending,
-  Stopping,
-  Suspended,
-  Running,
 }
 
 /**
@@ -224,37 +237,65 @@ enum MqttServiceState {
  *
  * @remarks
  *
+ * 有以下几种场景值得注意
+ *
  * 1. 初始化
  *   - 在t800.tsx进行初始化，分别在 未登录/登录 的情况下注入实例
  *
- * 2. 调用killMqttService退出
- *   - projects\platform\src\utils\index.ts#logoutEffect， 用户主动注销登录
- *   - projects\platform\src\utils\api.js#code === 600057， 用户token过期
- *   - projects\platform\src\t800.tsx#code === 600057， 用户token过期
+ * 2. 用户主动登出，调用quitMqttService
+ *   - projects\platform\src\pages\personal\personalDetails\api\index.jsx#userLogout
+ *
+ * 3. 用户token过期，调用forceQuitMqttService
+ *   - projects\platform\src\utils\api.js#code === 600057，
+ *   - projects\platform\src\t800.tsx#code === 600057，
+ *
+ * 4. 用户直接关闭Browser Tab，触发window.beforeunload事件，调用MqttService#quit
+ *   - TransportBuilder#postBuild
+ *   - SharedWorkerTransport#__handleBeforeWindowUnload
+ *
+ * @remarks
+ *
+ * 这里有一个值得注意的地方，就是并发问题。
+ *
+ * 在当前的设计当中，React层面有一个React组件叫做withMqttService（aka projects\platform\src\components\with_mqtt_service\index.tsx）。
+ *
+ * 当我们打开IMP-WEB其中一个页面，可能同时有2个以上的React UI组件，调用了withMqttService注入Mqtt的相关能力。这时候他们可能会同时发起WorkerAction.MqttConnect请求。
+ *
+ * MqttService我使用了MqttServiceState来处理这个问题。
+ *
+ * 之所以这么设计，还有另外一个考量是，早期迭代的几个版本中，兼容了以前老樊编写的MQTT模块的一项能力：
+ *
+ *   当BrowserTab不活跃的时候，Chrome会派发visibilitychange事件，此时老樊编写的MQTT模块会调用MqttClient#end方法，主动关闭MqttClient和Broker的链接。
+ *
+ * 我咨询过老樊这样做的原因。这是为了减轻Broker服务器的压力。
+ *
+ * @see [IMP-WEB MQTT 重构](https://confluence.leedarson.com/pages/viewpage.action?pageId=81331188)
  */
-class MqttService {
+class MqttService implements IMqttService {
   private __builtInListeners = new Map<
-    /** Event */ MqttEvent,
+    /** Event */ MqttEvent | TransportEvent,
     /** Listener */ Set<Callable>
   >();
   private __extraListeners = new Map<
-    /** Event */ MqttEvent,
+    /** Event */ MqttEvent | TransportEvent,
     /** Listener */ Set<Callable>
   >();
   private __listeners = new Map<
-    /** Event */ MqttEvent,
+    /** Event */ MqttEvent | TransportEvent,
     /** Listener */ Set<Callable>
   >();
-  private __sharedTransport = dummyTransport as Transport;
+  private __sharedTransport = dummyTransport as ITransport;
   private __env: IMSTDependence;
-  private __workers = new Set<MqttServiceWorker>();
+  private __workers = new Set<IMqttServiceWorker>();
   private __state = MqttServiceState.Created;
-
   private __id = DRAFT_ID;
+  private __transportBuilder = SUPPORTED_TRANSPORT_BUILDER.classical;
+  private __businessReferenceManager: BusinessReferenceManager;
 
   static create(
     sn: {
       id?: string;
+      transportBuilder?: TransportBuilder;
     },
     env: IMSTDependence
   ) {
@@ -264,13 +305,19 @@ class MqttService {
   constructor(
     sn: {
       id?: string;
+      transportBuilder?: TransportBuilder;
     },
     env: IMSTDependence
   ) {
     const id = sn.id || DRAFT_ID;
+    const transportBuilder = sn.transportBuilder;
 
     this.__env = env;
     this.__id = id;
+    this.__businessReferenceManager = new BusinessReferenceManager({}, env);
+    if (!isNil(transportBuilder)) {
+      this.__transportBuilder = transportBuilder;
+    }
 
     this.__builtInListeners.set(
       MqttEvent.Connect,
@@ -279,7 +326,7 @@ class MqttService {
           thisArg: this,
           func: () => {
             /**
-             * 订阅调用{@link fetClientId} 获得的clientId下的所有话题
+             * 订阅调用{@link getClientId} 获得的clientId下的所有话题
              *
              * @returns
              * @see [Understanding MQTT Topics & Wildcards by Case](https://www.emqx.com/en/blog/advanced-features-of-mqtt-topics)
@@ -311,13 +358,58 @@ class MqttService {
                  */
                 await transport.subscribe(transport.getTopic("#"));
               } catch (error) {
-                console.error("MqttService boot error", error);
+                console.error(
+                  `${new Date().toLocaleString("zh-CN", {
+                    hour12: false,
+                  })} MqttService: boot error\n  ${error}`
+                );
               } finally {
                 this.__state = MqttServiceState.Running;
               }
             };
 
             subscribeAllMqttTopics4ThisClientId();
+          },
+        },
+      ])
+    );
+
+    this.__builtInListeners.set(
+      MqttEvent.End,
+      new Set([
+        {
+          thisArg: this,
+          func: () => {
+            /**
+             * 这里有两种可能：
+             *
+             * 1. quit（用户主动登出）
+             * 2. forceQuit（用户token过期，访问API的时候，强制登出）
+             */
+            console.info(
+              `${new Date().toLocaleString("zh-CN", {
+                hour12: false,
+              })} MqttService: MqttEvent.End`
+            );
+
+            const from = `${window.location.pathname}${window.location.search}`;
+            const isSignInPage = /^\/login/gi.test(from);
+            if (isSignInPage) {
+              return;
+            }
+
+            if (!window.localStorage.getItem(CK_ACCESS_TOKEN)) {
+              console.info(
+                `${new Date().toLocaleString("zh-CN", {
+                  hour12: false,
+                })} MqttService: MqttEvent.End, from:\n${from}`
+              );
+
+              window.location.href =
+                from !== "/"
+                  ? `/login?from=${encodeURIComponent(from)}`
+                  : "/login";
+            }
           },
         },
       ])
@@ -366,7 +458,13 @@ class MqttService {
   }
 
   get dummyWorker() {
-    return new MqttServiceWorker(dummyWorker, this.__env);
+    return new MqttServiceWorker(
+      {
+        ...dummyWorker,
+        referenceManager: this.__businessReferenceManager,
+      },
+      this.__env
+    );
   }
 
   get isGuest() {
@@ -381,7 +479,16 @@ class MqttService {
     return this.__state;
   }
 
-  addEventListener(event: MqttEvent, callable: Callable) {
+  /**
+   * 浏览器页面处于hidden的情况下，也就是：
+   * const isDocumentVisible = document.visibilityState === 'visible';
+   * 是否结束当前Mqtt链接，以减轻Broker服务端压力
+   */
+  get suspendWhenBrowserTabHidden() {
+    return this.__transportBuilder.suspendWhenBrowserTabHidden;
+  }
+
+  addEventListener(event: MqttEvent | TransportEvent, callable: Callable) {
     const handlers = this.__extraListeners.get(event) || new Set();
     handlers.add(callable);
     this.__extraListeners.set(event, handlers);
@@ -392,46 +499,52 @@ class MqttService {
       return Promise.resolve(dummyTransport);
     }
 
-    return new Promise<Transport>(async (resolve, reject) => {
+    return new Promise<ITransport>(async (resolve, reject) => {
       const { cache } = this.__env;
 
-      const clientId = await this.fetClientId();
-      const mqttPassword = await cache.getItem<string>("mqttPassword");
-      const token = await cache.getItem<string>("token");
-
+      const mqttPassword = await cache.getItem<string>(CK_MQTT_PASSWORD);
+      const token = await cache.getItem<string>(CK_ACCESS_TOKEN);
       if (isNil(token)) {
         return reject(new Error("Guest is forbidden"));
       }
-
       if (isNil(mqttPassword)) {
         return reject(new Error("Mqtt password is required"));
       }
 
+      const clientId = await this.getClientId();
       const brokerUrl = await this.getBrokerUrl();
       const opts = this.getClientOptions({
         clientId,
         password: mqttPassword,
         token,
       });
+      const transport = this.__transportBuilder.build({
+        brokerUrl,
+        opts,
+      });
 
-      resolve(
-        MqttTransport.create({
-          brokerUrl,
-          opts,
-        })
-      );
+      this.__transportBuilder.postBuild(this, transport);
+
+      resolve(transport);
     });
   }
 
-  createWorker(transport?: Transport) {
+  createWorker(transport?: ITransport) {
     if (this.isGuest) {
-      return new MqttServiceWorker(dummyWorker, this.__env);
+      return new MqttServiceWorker(
+        {
+          ...dummyWorker,
+          referenceManager: this.__businessReferenceManager,
+        },
+        this.__env
+      );
     }
 
     const worker = !isNil(transport)
       ? MqttServiceWorker.create(
           {
             id: uniqueWorkerId(),
+            referenceManager: this.__businessReferenceManager,
             transport: transport,
           },
           this.__env
@@ -439,6 +552,7 @@ class MqttService {
       : MqttServiceWorker.create(
           {
             id: uniqueWorkerId(),
+            referenceManager: this.__businessReferenceManager,
             transport: this.__sharedTransport,
           },
           this.__env
@@ -449,14 +563,20 @@ class MqttService {
     return worker;
   }
 
+  async dispose() {
+    // TODO
+  }
+
   /**
    * 结束MqttService
    *
    * @remarks
+   * 调用时机是，用户主动登出
    *
+   * @remarks
    * 遍历调用MqttService持有的worker的unwatch方法，通知API取消关注相关的业务，注销所有事件处理程序
    */
-  async exit() {
+  async quit() {
     if (this.__state < MqttServiceState.Running) {
       return;
     }
@@ -464,16 +584,8 @@ class MqttService {
     this.__state = MqttServiceState.Stopping;
 
     // dispose all workers
-    await Promise.all(
-      Array.from(this.__workers.values()).map((worker) => worker.exit())
-    );
+    await this.removeWorkers();
 
-    this.__workers.forEach((w) => {
-      if (w.transport !== this.__sharedTransport) {
-        w.transport.end(true);
-      }
-    });
-    this.__workers.clear();
     this.__listeners.forEach((cs, e) => {
       cs.forEach((c) => {
         this.__sharedTransport.removeEventListener(e, c);
@@ -493,26 +605,51 @@ class MqttService {
    *
    * Client ID由API生成，之所以这么设计师因为，有不少系统通知，是由API生成，并且推送到MQTT Broker。如果没有对应的Client ID，API无法把对应的消息推送给客户端。
    */
-  async fetClientId() {
+  async getClientId() {
     const { api, cache } = this.__env;
+    const _getCachedClientId = async () => {
+      const data = await cache.getItem<string>(CK_MQTT_CLIENT_ID);
+      return data;
+    };
 
-    const uuid = await cache.getItem<string>("mqttUuid");
-    const mqttPwd = await cache.getItem<string>("mqttPassword");
-    const type = !getWindowPathPrefix() ? "base-page" : "sub-page";
-    const { data } = await api.get<string>(
-      "/v2/client/getClientId",
-      {
-        uuid,
-        mqttPwd,
-        type,
-      },
-      {
-        apiChange: PREFIX_HASH.building,
-        isCatch: false,
-      }
-    );
+    const _fetchClientId = async () => {
+      const uuid = await cache.getItem<string>(CK_MQTT_UUID);
+      const mqttPassword = await cache.getItem<string>(CK_MQTT_PASSWORD);
+      const type = !getWindowPathPrefix() ? "base-page" : "sub-page";
+      const { data } = await api.get<string>(
+        "/v2/client/getClientId",
+        {
+          uuid,
+          mqttPwd: mqttPassword,
+          type,
+        },
+        {
+          apiChange: PREFIX_HASH.building,
+          isCatch: false,
+        }
+      );
 
-    return data;
+      return data;
+    };
+
+    /**
+     * @remarks
+     *
+     * - 如果使用的是经典的MqttTransport，那么多个browser tab，每一个tab都应该调用去获取各自的client id
+     * - 如果使用的是SharedWorkerTransport，那么多个browser tab，连接的都是同一个SharedWorkerTransport，因此共享同一个client id
+     */
+    if (!this.__transportBuilder.useSharedClientId) {
+      const clientId = await _fetchClientId();
+      return clientId;
+    }
+
+    let clientId = await _getCachedClientId();
+    if (isNil(clientId)) {
+      clientId = await _fetchClientId();
+      await cache.setItem(CK_MQTT_CLIENT_ID, clientId);
+    }
+
+    return clientId;
   }
 
   /**
@@ -522,8 +659,8 @@ class MqttService {
    */
   async getBrokerUrl() {
     const { cache } = this.__env;
-    const host = await cache.getItem<string>("mqttHost");
-    const protocol = await cache.getItem<string>("mqttHostProtocol");
+    const host = await cache.getItem<string>(CK_MQTT_HOST);
+    const protocol = await cache.getItem<string>(CK_MQTT_HOST_PROTOCOL);
     return `${protocol}://${host}/mqtt`;
   }
 
@@ -590,7 +727,7 @@ class MqttService {
   }
 
   /**
-   * 初始化MqttService，创建共享的{@link Transport}
+   * 初始化MqttService，创建共享的{@link ITransport}
    * @returns
    */
   async init() {
@@ -600,7 +737,6 @@ class MqttService {
     if (this.__state !== MqttServiceState.Created) {
       return;
     }
-    console.log("MqttService init");
 
     this.__state = MqttServiceState.Initializing;
 
@@ -632,13 +768,13 @@ class MqttService {
    *
    * @remarks
    *
-   * kill方法并不会调用MqttServiceWorker#unwatch方法通知API取消关注IMP-Web的业务
+   * - 此方法的调用时机是：token过期
+   * - 因为用户的token过期，kill方法并不会调用MqttServiceWorker#unwatch方法通知API取消关注IMP-Web的业务
    */
-  kill() {
+  async forceQuit() {
     if (this.__state < MqttServiceState.Running) {
       return;
     }
-    console.log("MqttService kill");
 
     this.__state = MqttServiceState.Stopping;
     this.__workers.forEach((w) => {
@@ -650,10 +786,12 @@ class MqttService {
         each(KnownMqttEvents, (evt) => w.removeEventListener(evt));
       });
     });
+    await Promise.all(
+      Array.from(this.__workers.values()).map((worker) => worker.forceQuit())
+    );
     this.__workers.clear();
     this.__sharedTransport.end(false, {}, () => {
       each(KnownMqttEvents, (evt) => this.removeEventListener(evt));
-
       this.__state = MqttServiceState.Created;
     });
   }
@@ -668,7 +806,6 @@ class MqttService {
     if (this.__state === MqttServiceState.Running) {
       return;
     }
-    console.log("MqttService resume");
 
     this.__state = MqttServiceState.Resuming;
     this.__workers.forEach((w) => {
@@ -681,7 +818,7 @@ class MqttService {
     this.__state = MqttServiceState.Running;
   }
 
-  removeEventListener(event: MqttEvent, callable?: Callable) {
+  removeEventListener(event: MqttEvent | TransportEvent, callable?: Callable) {
     if (isNil(callable)) {
       this.__extraListeners.delete(event);
       return;
@@ -694,9 +831,21 @@ class MqttService {
     }
   }
 
-  async removeWorker(worker: MqttServiceWorker) {
-    await worker.exit();
+  async removeWorker(worker: IMqttServiceWorker) {
+    await worker.quit();
     this.__workers.delete(worker);
+  }
+
+  async removeWorkers() {
+    await Promise.all(
+      Array.from(this.__workers.values()).map((worker) => worker.quit())
+    );
+    this.__workers.forEach((w) => {
+      if (w.transport !== this.__sharedTransport) {
+        w.transport.end(true);
+      }
+    });
+    this.__workers.clear();
   }
 
   /**
@@ -706,7 +855,6 @@ class MqttService {
     if (this.__state <= MqttServiceState.Suspended) {
       return;
     }
-    console.log("MqttService suspend");
 
     this.__state = MqttServiceState.Suspending;
     this.__workers.forEach((w) => {
@@ -721,4 +869,4 @@ class MqttService {
   }
 }
 
-export { MqttService, MqttServiceState };
+export { MqttService, MqttServiceState, SUPPORTED_TRANSPORT_BUILDER };
